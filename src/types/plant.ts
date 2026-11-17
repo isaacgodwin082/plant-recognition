@@ -1,4 +1,27 @@
-export type HealthStatus = 'Healthy' | 'Needs Attention' | 'Critical' | 'Unclear';
+export type HealthStatus =
+  | 'Healthy'
+  | 'Mild Stress'
+  | 'Needs Attention'
+  | 'Critical'
+  | 'Unclear';
+
+export type PlantPartFocus =
+  | 'Whole Plant'
+  | 'Foliage'
+  | 'Flower'
+  | 'Stem & Bark'
+  | 'Spot or Pest';
+
+export type GrowingEnvironment =
+  | 'Indoor Houseplant'
+  | 'Outdoor Garden'
+  | 'Patio or Greenhouse'
+  | 'Wild or Field';
+
+export interface IdentifyingTrait {
+  trait: string;
+  detail: string;
+}
 
 export interface CareLight {
   level: string;
@@ -8,6 +31,7 @@ export interface CareLight {
 
 export interface CareWater {
   frequency: string;
+  recommendedIntervalDays: number;
   method: string;
   soilMoistureCue: string;
 }
@@ -22,6 +46,7 @@ export interface CareClimate {
   tempRangeC: string;
   tempRangeF: string;
   humidityRange: string;
+  airflowNote: string;
 }
 
 export interface CareFertilizer {
@@ -43,6 +68,13 @@ export interface CareGuide {
   climate: CareClimate;
   fertilizer: CareFertilizer;
   pruningAndRepotting: CarePruning;
+}
+
+export interface SeasonalCalendar {
+  spring: string;
+  summer: string;
+  autumn: string;
+  winter: string;
 }
 
 export interface ToxicityInfo {
@@ -68,6 +100,7 @@ export interface HealthAssessment {
   status: HealthStatus;
   summary: string;
   observations: string[];
+  immediateAction: string;
 }
 
 export interface PlantIdentificationResult {
@@ -76,12 +109,15 @@ export interface PlantIdentificationResult {
   confidence: number;
   commonName: string;
   scientificName: string;
+  synonyms: string[];
   family: string;
+  genus: string;
   origin: string;
   plantType: string;
-  morphologicalNotes: string;
+  identifyingTraits: IdentifyingTrait[];
   healthAssessment: HealthAssessment;
   careGuide: CareGuide;
+  seasonalCalendar: SeasonalCalendar;
   toxicity: ToxicityInfo;
   commonIssues: CommonIssue[];
   alternativeMatches: AlternativeMatch[];
@@ -93,14 +129,18 @@ export interface SampleSpecimen {
   commonName: string;
   scientificName: string;
   family: string;
+  partFocus: PlantPartFocus;
+  environment: GrowingEnvironment;
   contextNote: string;
   imageUrl: string;
 }
 
-export interface SavedSpecimen {
+export interface SavedPlantEntry {
   id: string;
   savedAt: string;
+  lastWateredAt: string;
   thumbnailDataUrl: string;
+  environment: GrowingEnvironment;
   fieldNote: string;
   result: PlantIdentificationResult;
 }

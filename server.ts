@@ -10,12 +10,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
-const MODEL_NAME = 'gemini-4-hydrogen';
+const PRIMARY_MODEL = 'gemini-4-hydrogen';
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 
 function getAiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured in server environment.');
+    throw new Error('GEMINI_API_KEY is not configured in the server environment.');
   }
   return new GoogleGenAI({
     apiKey,
@@ -32,58 +33,79 @@ const identificationSchema = {
   properties: {
     isPlant: {
       type: Type.BOOLEAN,
-      description: 'True if the image clearly depicts a living plant, foliage, flower, tree, succulent, fern, or botanical specimen; false otherwise.',
+      description: 'True if the photo depicts a living plant, foliage, blossom, succulent, herb, tree, or botanical specimen.',
     },
     nonPlantReason: {
       type: Type.STRING,
-      description: 'If isPlant is false, explain concisely what appears in the image and invite the user to upload a clear plant photo.',
+      description: 'If isPlant is false, briefly describe what is visible instead and guide the user to upload a clear plant photo.',
     },
     confidence: {
       type: Type.NUMBER,
-      description: 'Identification confidence score from 0 to 100.',
+      description: 'Identification confidence percentage from 0 to 100.',
     },
     commonName: {
       type: Type.STRING,
-      description: 'Primary English common name of the identified plant species.',
+      description: 'Most widely used English common name.',
     },
     scientificName: {
       type: Type.STRING,
       description: 'Accepted binomial Latin name (Genus species).',
     },
+    synonyms: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'Up to 3 alternative common names or former botanical names.',
+    },
     family: {
       type: Type.STRING,
-      description: 'Botanical family name (e.g., Araceae, Lamiaceae, Moraceae).',
+      description: 'Botanical family (e.g., Crassulaceae, Orchidaceae, Lamiaceae, Araceae).',
+    },
+    genus: {
+      type: Type.STRING,
+      description: 'Botanical genus name.',
     },
     origin: {
       type: Type.STRING,
-      description: 'Native geographic region and natural biome.',
+      description: 'Native geographic range and natural habitat.',
     },
     plantType: {
       type: Type.STRING,
-      description: 'Botanical growth form (e.g., Tropical climbing aroid, Herbaceous perennial, Woody shrub).',
+      description: 'Growth habit (e.g., Rosette succulent, Epiphytic orchid, Woody perennial herb).',
     },
-    morphologicalNotes: {
-      type: Type.STRING,
-      description: 'Concise analysis of the visible morphological traits in the photograph (leaf shape, venation, fenestration, phyllotaxis, stem, inflorescence) supporting this identification.',
+    identifyingTraits: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          trait: { type: Type.STRING, description: 'Morphological feature category (e.g., Leaf Margin, Venation, Inflorescence).' },
+          detail: { type: Type.STRING, description: 'Specific visible evidence observed in this photograph.' },
+        },
+        required: ['trait', 'detail'],
+      },
+      description: '3 to 4 concrete visual features observed in the uploaded photo that establish this species match.',
     },
     healthAssessment: {
       type: Type.OBJECT,
       properties: {
         status: {
           type: Type.STRING,
-          description: 'Must be one of: Healthy, Needs Attention, Critical, or Unclear.',
+          description: 'Must be one of: Healthy, Mild Stress, Needs Attention, Critical, or Unclear.',
         },
         summary: {
           type: Type.STRING,
-          description: 'One-sentence clinical assessment of visible foliage vigor and condition.',
+          description: 'Concise clinical summary of the specimen condition shown in the photo.',
         },
         observations: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
-          description: 'Specific visual cues observed in the image (e.g., uniform chlorophyll tone, crisp leaf margins, slight tip browning).',
+          description: '2 to 4 visual observations from the specimen (leaf turgor, chlorosis, spotting, new shoots, pests).',
+        },
+        immediateAction: {
+          type: Type.STRING,
+          description: 'Single most important next step right now for this specimen.',
         },
       },
-      required: ['status', 'summary', 'observations'],
+      required: ['status', 'summary', 'observations', 'immediateAction'],
     },
     careGuide: {
       type: Type.OBJECT,
@@ -101,10 +123,14 @@ const identificationSchema = {
           type: Type.OBJECT,
           properties: {
             frequency: { type: Type.STRING },
+            recommendedIntervalDays: {
+              type: Type.INTEGER,
+              description: 'Typical interval in days between waterings during active growth (e.g., 7, 14).',
+            },
             method: { type: Type.STRING },
             soilMoistureCue: { type: Type.STRING },
           },
-          required: ['frequency', 'method', 'soilMoistureCue'],
+          required: ['frequency', 'recommendedIntervalDays', 'method', 'soilMoistureCue'],
         },
         soil: {
           type: Type.OBJECT,
@@ -121,8 +147,9 @@ const identificationSchema = {
             tempRangeC: { type: Type.STRING },
             tempRangeF: { type: Type.STRING },
             humidityRange: { type: Type.STRING },
+            airflowNote: { type: Type.STRING },
           },
-          required: ['tempRangeC', 'tempRangeF', 'humidityRange'],
+          required: ['tempRangeC', 'tempRangeF', 'humidityRange', 'airflowNote'],
         },
         fertilizer: {
           type: Type.OBJECT,
@@ -145,12 +172,22 @@ const identificationSchema = {
       },
       required: ['light', 'water', 'soil', 'climate', 'fertilizer', 'pruningAndRepotting'],
     },
+    seasonalCalendar: {
+      type: Type.OBJECT,
+      properties: {
+        spring: { type: Type.STRING, description: 'Concise spring care focus (growth flush, repotting, feeding).' },
+        summer: { type: Type.STRING, description: 'Concise summer care focus (hydration, heat/sun protection).' },
+        autumn: { type: Type.STRING, description: 'Concise autumn care focus (tapering fertilizer, indoor transition).' },
+        winter: { type: Type.STRING, description: 'Concise winter care focus (dormancy rest, reduced watering, frost/draft protection).' },
+      },
+      required: ['spring', 'summer', 'autumn', 'winter'],
+    },
     toxicity: {
       type: Type.OBJECT,
       properties: {
-        pets: { type: Type.STRING, description: 'Clear safety rating for cats and dogs (e.g., Toxic to cats and dogs, Non-toxic).' },
-        humans: { type: Type.STRING, description: 'Clear safety note for humans.' },
-        note: { type: Type.STRING, description: 'Active compounds (e.g., calcium oxalate crystals) or handling precautions.' },
+        pets: { type: Type.STRING },
+        humans: { type: Type.STRING },
+        note: { type: Type.STRING },
       },
       required: ['pets', 'humans', 'note'],
     },
@@ -165,7 +202,7 @@ const identificationSchema = {
         },
         required: ['symptom', 'cause', 'remedy'],
       },
-      description: '3 to 4 most common cultivation issues and practical fixes for this species.',
+      description: '3 to 4 common problems for this species and actionable fixes.',
     },
     alternativeMatches: {
       type: Type.ARRAY,
@@ -179,7 +216,7 @@ const identificationSchema = {
         },
         required: ['commonName', 'scientificName', 'confidence', 'distinguishingFeature'],
       },
-      description: 'Up to 3 plausible botanical lookalike species and how to distinguish them.',
+      description: 'Up to 3 close botanical lookalikes and how to tell them apart.',
     },
   },
   required: [
@@ -187,12 +224,15 @@ const identificationSchema = {
     'confidence',
     'commonName',
     'scientificName',
+    'synonyms',
     'family',
+    'genus',
     'origin',
     'plantType',
-    'morphologicalNotes',
+    'identifyingTraits',
     'healthAssessment',
     'careGuide',
+    'seasonalCalendar',
     'toxicity',
     'commonIssues',
     'alternativeMatches',
@@ -204,17 +244,17 @@ function parseGeminiError(err: unknown): { status: number; message: string; isTr
   if (isAbort) {
     return {
       status: 504,
-      message: 'The botanical recognition model is taking longer than expected due to high demand. Please try again in a moment.',
+      message: 'The recognition model timed out due to temporary demand. Please try again in a moment.',
       isTransient: true,
     };
   }
 
   const raw = err instanceof Error ? err.message : String(err);
   let status = 500;
-  let message = raw || 'Unable to reach botanical recognition model.';
+  let message = raw || 'Unable to process botanical recognition request.';
 
   try {
-    const parsed = JSON.parse(raw) as { error?: { code?: number; message?: string; status?: string } };
+    const parsed = JSON.parse(raw) as { error?: { code?: number; message?: string } };
     if (parsed?.error) {
       if (typeof parsed.error.code === 'number') status = parsed.error.code;
       if (typeof parsed.error.message === 'string') message = parsed.error.message;
@@ -229,7 +269,7 @@ function parseGeminiError(err: unknown): { status: number; message: string; isTr
   return { status, message, isTransient };
 }
 
-async function generateWithResilience(
+async function callModelWithFallback(
   ai: GoogleGenAI,
   params: {
     contents: unknown;
@@ -240,13 +280,12 @@ async function generateWithResilience(
 ) {
   let lastError: unknown;
 
-  // Attempt 1: Primary gemini-4-hydrogen
   try {
     return await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: PRIMARY_MODEL,
       contents: params.contents as never,
       config: {
-        abortSignal: AbortSignal.timeout(12000),
+        abortSignal: AbortSignal.timeout(22000),
         systemInstruction: params.systemInstruction,
         ...(params.responseMimeType ? { responseMimeType: params.responseMimeType } : {}),
         ...(params.responseSchema ? { responseSchema: params.responseSchema } : {}),
@@ -265,13 +304,12 @@ async function generateWithResilience(
 
   await new Promise((r) => setTimeout(r, 500));
 
-  // Attempt 2: Fallback to gemini-3.1-flash-lite during demand spikes or timeouts
   try {
     return await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: FALLBACK_MODEL,
       contents: params.contents as never,
       config: {
-        abortSignal: AbortSignal.timeout(18000),
+        abortSignal: AbortSignal.timeout(22000),
         systemInstruction: params.systemInstruction,
         ...(params.responseMimeType ? { responseMimeType: params.responseMimeType } : {}),
         ...(params.responseSchema ? { responseSchema: params.responseSchema } : {}),
@@ -293,14 +331,16 @@ async function startServer() {
 
   app.post('/api/identify', async (req, res) => {
     try {
-      const { imageBase64, mimeType, notes } = req.body as {
+      const { imageBase64, mimeType, partFocus, environment, notes } = req.body as {
         imageBase64?: string;
         mimeType?: string;
+        partFocus?: string;
+        environment?: string;
         notes?: string;
       };
 
       if (!imageBase64 || typeof imageBase64 !== 'string') {
-        res.status(400).json({ error: 'Please provide a valid plant image for identification.' });
+        res.status(400).json({ error: 'Please provide a plant photograph to analyze.' });
         return;
       }
 
@@ -309,20 +349,15 @@ async function startServer() {
 
       const ai = getAiClient();
 
-      const promptLines = [
-        'Examine this photograph carefully as an expert botanist and horticulturist.',
-        '1. Determine whether the image contains a real plant or botanical specimen.',
-        '2. Identify the exact species (scientific binomial name and common name) using visible morphological features (leaf margin, venation, fenestration, phyllotaxis, stem, flowers, or bark).',
-        '3. Assess the visible health condition of the plant in this specific photograph (signs of chlorosis, necrosis, pests, overwatering, etiolation, or vigorous growth).',
-        '4. Provide practical, species-specific cultivation instructions covering light, watering, soil pH/substrate, temperature/humidity, fertilizer, pruning/repotting, toxicity, and troubleshooting.',
-        '5. List up to 3 plausible lookalike species and the key feature that separates them from your primary match.',
-      ];
+      const promptParts = [
+        'Examine this plant photograph thoroughly as an expert botanical taxonomist and consulting horticulturist.',
+        partFocus ? `Subject focus selected by grower: ${partFocus}.` : '',
+        environment ? `Growing environment: ${environment}. Tailor placement, watering cadence, and winter instructions to this setting.` : '',
+        notes && notes.trim() ? `Grower field observations: "${notes.trim()}"` : '',
+        'Identify the exact species, cite concrete morphological features visible in this photograph, evaluate visible health/stress cues, provide a complete care matrix with a realistic watering interval in days, include a 4-season care calendar, toxicity warnings, common issues, and up to 3 lookalike species.',
+      ].filter(Boolean);
 
-      if (notes && notes.trim()) {
-        promptLines.push(`User field context note: "${notes.trim()}"`);
-      }
-
-      const response = await generateWithResilience(ai, {
+      const response = await callModelWithFallback(ai, {
         contents: {
           parts: [
             {
@@ -332,19 +367,19 @@ async function startServer() {
               },
             },
             {
-              text: promptLines.join('\n'),
+              text: promptParts.join('\n'),
             },
           ],
         },
         systemInstruction:
-          'You are a senior botanical taxonomist and horticultural specialist at a botanical herbarium. Provide accurate, grounded, species-specific identification and practical cultivation guidance. Do not invent fake metrics; keep numeric temperature, humidity, pH, and confidence values clear and realistic.',
+          'You are a senior botanist and horticulturist. Deliver accurate taxonomic identification grounded in visible morphology and practical, species-specific cultivation care. If the image does not show a plant, set isPlant to false and explain clearly.',
         responseMimeType: 'application/json',
         responseSchema: identificationSchema,
       });
 
       const rawText = response.text?.trim();
       if (!rawText) {
-        res.status(502).json({ error: 'The recognition model returned an empty response. Please try another photo.' });
+        res.status(502).json({ error: 'The recognition model returned an empty response. Please try a clearer photograph.' });
         return;
       }
 
@@ -359,31 +394,32 @@ async function startServer() {
 
   app.post('/api/care-chat', async (req, res) => {
     try {
-      const { specimen, question, history, imageBase64, mimeType } = req.body as {
+      const { specimen, question, history, imageBase64, mimeType, environment } = req.body as {
         specimen?: PlantIdentificationResult;
         question?: string;
         history?: Array<{ role: 'user' | 'model'; text: string }>;
         imageBase64?: string;
         mimeType?: string;
+        environment?: string;
       };
 
       if (!specimen || !question || !question.trim()) {
-        res.status(400).json({ error: 'Specimen context and question are required.' });
+        res.status(400).json({ error: 'Both specimen context and a question are required.' });
         return;
       }
 
       const ai = getAiClient();
 
-      const contextSummary = [
-        `Identified Species: ${specimen.commonName} (${specimen.scientificName}), Family ${specimen.family}.`,
-        `Observed Health Status: ${specimen.healthAssessment.status} — ${specimen.healthAssessment.summary}`,
+      const contextLines = [
+        `Species: ${specimen.commonName} (${specimen.scientificName}), Family ${specimen.family}`,
+        environment ? `Growing setting: ${environment}` : '',
+        `Observed health: ${specimen.healthAssessment.status} — ${specimen.healthAssessment.summary}`,
         `Light: ${specimen.careGuide.light.level} (${specimen.careGuide.light.hoursPerDay})`,
-        `Water: ${specimen.careGuide.water.frequency} (${specimen.careGuide.water.soilMoistureCue})`,
+        `Water: ${specimen.careGuide.water.frequency} (every ~${specimen.careGuide.water.recommendedIntervalDays} days; ${specimen.careGuide.water.soilMoistureCue})`,
         `Soil: ${specimen.careGuide.soil.mix} (pH ${specimen.careGuide.soil.pHRange})`,
-        `Climate: ${specimen.careGuide.climate.tempRangeC}, Humidity ${specimen.careGuide.climate.humidityRange}`,
-      ].join('\n');
+      ].filter(Boolean).join('\n');
 
-      const historyText = (history ?? [])
+      const recentHistory = (history ?? [])
         .slice(-6)
         .map((m) => `${m.role === 'user' ? 'Grower' : 'Botanist'}: ${m.text}`)
         .join('\n');
@@ -400,16 +436,16 @@ async function startServer() {
       }
 
       parts.push({
-        text: `${contextSummary}\n\n${historyText ? `Recent conversation:\n${historyText}\n\n` : ''}Grower question: ${question.trim()}\n\nRespond clearly in 2-4 concise paragraphs or practical steps tailored to this exact plant specimen. Use plain prose without markdown clutter.`,
+        text: `${contextLines}\n\n${recentHistory ? `Prior Q&A:\n${recentHistory}\n\n` : ''}Grower question: ${question.trim()}\n\nAnswer concisely in 2–4 plain prose paragraphs or practical steps specific to this plant.`,
       });
 
-      const response = await generateWithResilience(ai, {
+      const response = await callModelWithFallback(ai, {
         contents: { parts },
         systemInstruction:
-          'You are a consulting horticulturist answering practical plant care questions based on the identified species and specimen photograph. Be concrete, accurate, and concise.',
+          'You are a practical horticultural specialist answering follow-up care questions grounded in the identified species and specimen photo. Avoid markdown clutter.',
       });
 
-      res.json({ answer: response.text?.trim() || 'No guidance could be generated for that question.' });
+      res.json({ answer: response.text?.trim() || 'No guidance was returned for that question.' });
     } catch (err: unknown) {
       console.error('Error in /api/care-chat:', err);
       const { status, message } = parseGeminiError(err);
@@ -420,7 +456,7 @@ async function startServer() {
   const distDir = path.resolve(__dirname, 'dist');
   const isProd =
     process.env.NODE_ENV === 'production' ||
-    (process.env.npm_lifecycle_event === 'start' &&
+    ((process.env.npm_lifecycle_event === 'start' || path.basename(__filename) === 'server.js') &&
       fs.existsSync(path.join(distDir, 'index.html')));
 
   if (!isProd) {
@@ -443,7 +479,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Folia Herbarium server running on http://0.0.0.0:${PORT}`);
+    console.log(`Folia Herbarium server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

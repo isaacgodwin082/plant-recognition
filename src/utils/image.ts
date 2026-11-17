@@ -4,8 +4,8 @@ export interface NormalizedImage {
   mimeType: string;
 }
 
-const MAX_DIMENSION = 1400;
-const JPEG_QUALITY = 0.86;
+const MAX_DIMENSION = 1024;
+const JPEG_QUALITY = 0.85;
 
 function resizeImageElement(img: HTMLImageElement): NormalizedImage {
   let width = img.naturalWidth || img.width;
