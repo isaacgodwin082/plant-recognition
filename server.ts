@@ -284,6 +284,7 @@ async function generateWithResilience(
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '16mb' }));
 
   app.get('/api/health', (_req, res) => {
@@ -416,7 +417,11 @@ async function startServer() {
     }
   });
 
-  const isProd = process.env.NODE_ENV === 'production';
+  const distDir = path.resolve(__dirname, 'dist');
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    (process.env.npm_lifecycle_event === 'start' &&
+      fs.existsSync(path.join(distDir, 'index.html')));
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
@@ -426,7 +431,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       const indexPath = path.join(distDir, 'index.html');
